@@ -1,22 +1,25 @@
-from telegram.ext import Application, CommandHandler, MessageHandler, filters #CallbackQueryHandler, CallbackContext
-from telegram import Update, Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Update
 from dotenv import load_dotenv
 import os 
 import openai
-
+from openai import OpenAI, AsyncOpenAI
+#import asyncio
 
 # подгружаем переменные окружения
 load_dotenv()
 
 # токен бота
 TOKEN = os.getenv('TG_TOKEN')
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
-# API-key
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-default_system = "" #инструкция для chatgpt
-model = "gpt-3.5-turbo"
-temperature = 0
+# настройки chatgpt
+default_system = os.getenv('SYSTEM')
+model = os.getenv('MODEL')
+user_choice_model = {'gpt-4-turbo','gpt-4-1106','gpt-3.5-turbo'}
+temperature = int(os.getenv('TEMPERATURE'))
 
+client = AsyncOpenAI()
 
 # функция-обработчик команды /start
 async def start(update, context):
@@ -25,7 +28,9 @@ async def start(update, context):
 # функция-обработчик текстовых сообщений
 async def text(update, context):   
     user_message = update.effective_message.text
-    await update.message.reply_text(f'Текстовое собщение получено:{user_message}') 
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")  # Отправляем информацию о том, что бот печатает   
+    response = await async_get_answer(default_system, user_message)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=response, reply_to_message_id=update.message.message_id)
 
 # функция-обработчик изображение
 async def image(update, context):
@@ -39,27 +44,39 @@ async def voice(update: Update, context):
     new_file = await update.message.voice.get_file()
     await update.message.reply_text(f"Голосовое сообщение получено!")
 
-# async def settings(update, context):
-#     command_text = update.message.text 
-#     # Разделяем команду и аргументы
-#     parts = command_text.split(maxsplit=1)
-#     if len(parts) > 1:
-#         answer_text = parts[1]
-#         await update.message.reply_text(f"Спасибо, изменения внесены. Новое значение {answer_text}") 
+async def settings(update, context):
+    global model
+    global default_system
+    command_text = update.message.text 
+    # Разделяем команду и аргументы
+    parts = command_text.split(maxsplit=2) 
+    if len(parts) == 3:
+            if parts[1]=='model' and parts[2] in user_choice_model:
+                model = parts[2]
+                await update.message.reply_text(f"Модель успешно изменена на: {parts[2]}")
+            elif parts[1]=='system':
+                default_system = parts[2]
+                await update.message.reply_text(f"System успешно изменен на: {parts[2]}")
+    elif len(parts) == 2:
+        if parts[1]=='model':
+            await update.message.reply_text(f"Текущая модель: {model}") 
+        if parts[1]=='system':
+            await update.message.reply_text(f"Текущий system: {default_system}") 
+         
 
-async def async_get_answer(self, system:str = default_system, query:str = None):
+async def async_get_answer(system:str = default_system, query:str = None):
         #Асинхронная функция получения ответа от chatgpt   
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": query}
         ]
-
         # получение ответа от chatgpt
-        completion = await openai.ChatCompletion.acreate(model=model,
+        completion = await client.chat.completions.create(model=model,
                                                   messages=messages,
                                                   temperature=temperature)
         
         return completion.choices[0].message.content
+
 
 def main():
     # создаем приложение и передаем в него токен
@@ -69,8 +86,8 @@ def main():
     # добавляем обработчик команды /start
     application.add_handler(CommandHandler("start", start))
 
-    # добавляем обработчик команды /settings
-    # application.add_handler(CommandHandler("settings", settings))
+    #добавляем обработчик команды /settings
+    application.add_handler(CommandHandler("settings", settings))
 
     # добавляем обработчик текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT, text))
@@ -84,6 +101,5 @@ def main():
     # запускаем бота (нажать Ctrl-C для остановки бота)
     application.run_polling()
     print('Бот остановлен')
-
 if __name__ == "__main__":
     main()
